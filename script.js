@@ -10,7 +10,7 @@ const WORLD_W = 1000;
 const WORLD_H = 700;
 const GROUND_Y = 630;
 const GRAVITY = 2000;
-const BALL_R = 30;
+const MAX_BALL_R = 42; // biggest ball in the picker
 
 // ---- Trampoline ----
 const TRAMP_Y = 470;
@@ -36,16 +36,19 @@ const MAX_RELEASE_GAIN = 4; // >1 puts energy back in, like a person bouncing
 
 // The ball is wide, so it presses on a patch rather than a point, which keeps
 // the high modes from spiking under it.
-const MODE_GRIP = [];
-for (let k = 0; k < MODES; k++) {
-  const spread = ((k + 1) * Math.PI * BALL_R * 1.5) / MAT_LEN;
-  MODE_GRIP.push(Math.exp(-0.5 * spread * spread));
+const MODE_GRIP = new Array(MODES).fill(1);
+
+function setGrip(radius) {
+  for (let k = 0; k < MODES; k++) {
+    const spread = ((k + 1) * Math.PI * radius * 1.5) / MAT_LEN;
+    MODE_GRIP[k] = Math.exp(-0.5 * spread * spread);
+  }
 }
 
 const STEP = 1 / 480;
 
 const mat = { q: new Float64Array(MODES), v: new Float64Array(MODES), target: new Float64Array(MODES) };
-const ball = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, squash: 0, inContact: false, groundTime: 0 };
+const ball = { x: 0, y: 0, vx: 0, vy: 0, r: 30, mass: 1, type: null, angle: 0, squash: 0, inContact: false, groundTime: 0 };
 
 let bounces = 0;
 let maxHeight = Number(heightInput.value);
@@ -58,8 +61,8 @@ function drop(x, y) {
   const overTramp = x > POST_L && x < POST_R;
   ball.x = x;
   ball.y = overTramp
-    ? Math.max(TRAMP_Y - BALL_R - 550, Math.min(y, TRAMP_Y - 100))
-    : Math.min(y, GROUND_Y - BALL_R);
+    ? Math.max(TRAMP_Y - ball.r - 450, Math.min(y, TRAMP_Y - 100))
+    : Math.min(y, GROUND_Y - ball.r);
   ball.vx = (Math.random() - 0.5) * 60;
   ball.vy = 0;
   ball.groundTime = 0;
@@ -90,7 +93,7 @@ function fitMat(u, sag, out) {
 // the release strength so the next bounce lands closer to it.
 function retuneRelease() {
   const rise = (ball.vy * ball.vy) / (2 * GRAVITY);
-  const wanted = ball.y - (TRAMP_Y - BALL_R - maxHeight);
+  const wanted = ball.y - (TRAMP_Y - ball.r - maxHeight);
   if (rise < 1 || wanted <= 0) return;
   const ratio = Math.min(Math.max(wanted / rise, 0.5), 2);
   releaseGain = Math.min(Math.max(releaseGain * Math.pow(ratio, 0.7), 1), MAX_RELEASE_GAIN);
@@ -102,22 +105,24 @@ function step(dt) {
 
   // Ball vs. trampoline
   const wasInContact = ball.inContact;
-  const sag = ball.y + BALL_R - TRAMP_Y; // how far the ball's bottom is below the mat's rest line
+  const sag = ball.y + ball.r - TRAMP_Y; // how far the ball's bottom is below the mat's rest line
   const overFrame = ball.x > POST_L && ball.x < POST_R;
   ball.inContact = overFrame && sag > 0 && (wasInContact || ball.y < TRAMP_Y);
 
   if (ball.inContact) {
     const u = (ball.x - MAT_X0) / MAT_LEN;
     const edge = Math.min(Math.max(u, 0.1), 0.9);
-    const stiffness = (MAT_STIFFNESS * 0.25) / (edge * (1 - edge)); // stiffer near the edges
+    // Stiffer near the edges, and heavier balls get a somewhat firmer mat so they
+    // sink deeper than light ones without hitting the ground.
+    const stiffness = ((MAT_STIFFNESS * 0.25) / (edge * (1 - edge))) * Math.sqrt(ball.mass);
 
     let force = stiffness * sag;
     if (ball.vy > 0) force += CONTACT_DAMPING * ball.vy;
     else force *= releaseGain;
 
-    ball.vy -= force * dt;
+    ball.vy -= (force / ball.mass) * dt;
     ball.vx *= 1 - 2 * dt; // the mat grips the ball a little
-    ball.vx += force * CENTER_PUSH * ((MAT_X0 + MAT_X1) / 2 - ball.x) / (MAT_LEN / 2) * dt;
+    ball.vx += (force / ball.mass) * CENTER_PUSH * ((MAT_X0 + MAT_X1) / 2 - ball.x) / (MAT_LEN / 2) * dt;
     contactForce = force;
 
     if (!wasInContact && ball.vy > 200) {
@@ -147,7 +152,7 @@ function step(dt) {
 
   // Keep the bounce from going higher than the chosen height.
   if (!ball.inContact && ball.vy < 0) {
-    const room = ball.y - (TRAMP_Y - BALL_R - maxHeight);
+    const room = ball.y - (TRAMP_Y - ball.r - maxHeight);
     if (room <= 0) ball.vy = 0;
     else ball.vy = Math.max(ball.vy, -Math.sqrt(2 * GRAVITY * room));
   }
@@ -156,33 +161,34 @@ function step(dt) {
   ball.x += ball.vx * dt;
   ball.y += ball.vy * dt;
   ball.vx *= 1 - 0.15 * dt;
-  ball.angle += (ball.vx / BALL_R) * dt;
+  ball.angle += (ball.vx / ball.r) * dt;
 
   // Ground
-  if (ball.y + BALL_R > GROUND_Y) {
-    ball.y = GROUND_Y - BALL_R;
+  if (ball.y + ball.r > GROUND_Y) {
+    ball.y = GROUND_Y - ball.r;
     ball.vy = Math.abs(ball.vy) < 60 ? 0 : -ball.vy * 0.45;
     ball.vx *= 1 - 3 * dt;
   }
 
   // Screen edges
-  if (ball.x < view.left + BALL_R) {
-    ball.x = view.left + BALL_R;
+  if (ball.x < view.left + ball.r) {
+    ball.x = view.left + ball.r;
     ball.vx = Math.abs(ball.vx) * 0.6;
-  } else if (ball.x > view.right - BALL_R) {
-    ball.x = view.right - BALL_R;
+  } else if (ball.x > view.right - ball.r) {
+    ball.x = view.right - ball.r;
     ball.vx = -Math.abs(ball.vx) * 0.6;
   }
 
   // Ball came to rest on the ground (missed the trampoline): put it back.
-  const resting = ball.y + BALL_R >= GROUND_Y - 0.5 && Math.abs(ball.vy) < 1;
+  const resting = ball.y + ball.r >= GROUND_Y - 0.5 && Math.abs(ball.vy) < 1;
   ball.groundTime = resting ? ball.groundTime + dt : 0;
   if (ball.groundTime > 1.5) resetBall();
 
   // Squash on impact, stretch in the air
+  const give = ball.type.squash;
   const target = ball.inContact
-    ? Math.min(contactForce / 20000, 1) * 0.3
-    : -Math.min(Math.abs(ball.vy) / 6000, 0.12);
+    ? Math.min(contactForce / (20000 * Math.sqrt(ball.mass)), 1) * 0.3 * give
+    : -Math.min(Math.abs(ball.vy) / 6000, 0.12) * give;
   ball.squash += (target - ball.squash) * Math.min(1, dt * 40);
 }
 
@@ -192,8 +198,8 @@ const view = { w: 0, h: 0, dpr: 1, scale: 1, offsetX: 0, offsetY: 0, left: 0, ri
 
 function resize() {
   view.dpr = window.devicePixelRatio || 1;
-  view.w = window.innerWidth;
-  view.h = window.innerHeight;
+  view.w = canvas.parentElement.clientWidth;
+  view.h = canvas.parentElement.clientHeight;
   canvas.width = Math.round(view.w * view.dpr);
   canvas.height = Math.round(view.h * view.dpr);
 
@@ -205,16 +211,17 @@ function resize() {
   view.top = -view.offsetY / view.scale;
 
   // Don't let the slider go past the top of the screen.
-  const room = Math.floor((TRAMP_Y - BALL_R - view.top - 20) / 10) * 10;
-  heightInput.max = Math.max(150, Math.min(500, room));
+  const room = Math.floor((TRAMP_Y - MAX_BALL_R - view.top - 20) / 10) * 10;
+  heightInput.max = Math.max(150, Math.min(450, room));
   maxHeight = Number(heightInput.value);
   heightOut.textContent = maxHeight;
 }
 
 function toWorld(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
   return {
-    x: (clientX - view.offsetX) / view.scale,
-    y: (clientY - view.offsetY) / view.scale,
+    x: (clientX - rect.left - view.offsetX) / view.scale,
+    y: (clientY - rect.top - view.offsetY) / view.scale,
   };
 }
 
@@ -255,11 +262,11 @@ function drawGround() {
 }
 
 function drawShadow() {
-  const height = Math.max(0, GROUND_Y - (ball.y + BALL_R));
+  const height = Math.max(0, GROUND_Y - (ball.y + ball.r));
   const k = Math.max(0.35, 1 - height / 900);
   ctx.fillStyle = `rgba(0, 0, 0, ${0.22 * k})`;
   ctx.beginPath();
-  ctx.ellipse(ball.x, GROUND_Y + 8, BALL_R * 1.3 * k, 7 * k, 0, 0, Math.PI * 2);
+  ctx.ellipse(ball.x, GROUND_Y + 8, ball.r * 1.3 * k, 7 * k, 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -330,43 +337,155 @@ function drawTrampoline() {
   }
 }
 
+// ---- Balls ----
+// Each painter draws a flat-coloured ball centred on the origin (already clipped
+// to the ball's circle). Shading is added on top by drawBallFace.
+
+function paintBasketball(c, r) {
+  c.fillStyle = '#e0651f';
+  c.fillRect(-r, -r, r * 2, r * 2);
+  c.strokeStyle = '#3a1a0a';
+  c.lineWidth = r * 0.07;
+  c.beginPath();
+  c.moveTo(-r, 0);
+  c.lineTo(r, 0);
+  c.moveTo(0, -r);
+  c.lineTo(0, r);
+  c.stroke();
+  for (const dir of [-1, 1]) {
+    c.beginPath();
+    c.arc(dir * r * 1.15, 0, r * 0.85, 0, Math.PI * 2);
+    c.stroke();
+  }
+}
+
+function paintTennis(c, r) {
+  c.fillStyle = '#d3e63c';
+  c.fillRect(-r, -r, r * 2, r * 2);
+  c.strokeStyle = '#f7f7ef';
+  c.lineWidth = r * 0.14;
+  for (const dir of [-1, 1]) {
+    c.beginPath();
+    c.arc(dir * r * 1.45, 0, r * 1.05, 0, Math.PI * 2);
+    c.stroke();
+  }
+}
+
+function paintBeach(c, r) {
+  const colors = ['#ff5a5a', '#ffffff', '#ffd93b', '#ffffff', '#3ea6ff', '#ffffff'];
+  colors.forEach((color, i) => {
+    c.fillStyle = color;
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.arc(0, 0, r * 1.2, (i * Math.PI) / 3, ((i + 1) * Math.PI) / 3);
+    c.fill();
+  });
+  c.fillStyle = '#ffffff';
+  c.beginPath();
+  c.arc(0, 0, r * 0.16, 0, Math.PI * 2);
+  c.fill();
+}
+
+function paintSoccer(c, r) {
+  c.fillStyle = '#f7f7f7';
+  c.fillRect(-r, -r, r * 2, r * 2);
+  const pentagon = (cx, cy, radius, rot) => {
+    c.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = rot + (i * Math.PI * 2) / 5;
+      const x = cx + Math.cos(a) * radius;
+      const y = cy + Math.sin(a) * radius;
+      if (i === 0) c.moveTo(x, y);
+      else c.lineTo(x, y);
+    }
+    c.closePath();
+  };
+  c.fillStyle = '#1d1d1d';
+  c.strokeStyle = '#1d1d1d';
+  c.lineWidth = r * 0.06;
+  pentagon(0, 0, r * 0.36, -Math.PI / 2);
+  c.fill();
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+    c.beginPath();
+    c.moveTo(Math.cos(a) * r * 0.36, Math.sin(a) * r * 0.36);
+    c.lineTo(Math.cos(a) * r * 0.66, Math.sin(a) * r * 0.66);
+    c.stroke();
+    const b = a + Math.PI / 5;
+    pentagon(Math.cos(b) * r * 1.02, Math.sin(b) * r * 1.02, r * 0.36, b + Math.PI);
+    c.fill();
+  }
+}
+
+function paintBowling(c, r) {
+  c.fillStyle = '#1e2a55';
+  c.fillRect(-r, -r, r * 2, r * 2);
+  c.strokeStyle = 'rgba(120, 150, 255, 0.35)';
+  c.lineWidth = r * 0.18;
+  c.beginPath();
+  c.arc(-r * 0.7, r * 0.5, r * 0.9, -1, 1.2);
+  c.stroke();
+  c.fillStyle = '#05070f';
+  for (const [x, y, hole] of [[-0.2, -0.55, 0.1], [0.14, -0.55, 0.1], [-0.03, -0.32, 0.09]]) {
+    c.beginPath();
+    c.arc(x * r, y * r, hole * r, 0, Math.PI * 2);
+    c.fill();
+  }
+}
+
+function paintWatermelon(c, r) {
+  c.fillStyle = '#48b24f';
+  c.fillRect(-r, -r, r * 2, r * 2);
+  c.strokeStyle = '#1f6d2c';
+  c.lineWidth = r * 0.17;
+  for (let i = -3; i <= 3; i++) {
+    const x = i * r * 0.36;
+    c.beginPath();
+    c.moveTo(x, -r);
+    c.bezierCurveTo(x + r * 0.35, -r * 0.4, x - r * 0.35, r * 0.4, x, r);
+    c.stroke();
+  }
+}
+
+const BALLS = [
+  { id: 'basketball', name: 'Basketball', r: 30, mass: 1.0, squash: 1.0, paint: paintBasketball },
+  { id: 'tennis', name: 'Tennis ball', r: 20, mass: 0.4, squash: 1.3, paint: paintTennis },
+  { id: 'beach', name: 'Beach ball', r: 42, mass: 0.3, squash: 0.9, paint: paintBeach },
+  { id: 'soccer', name: 'Soccer ball', r: 32, mass: 1.0, squash: 1.0, paint: paintSoccer },
+  { id: 'bowling', name: 'Bowling ball', r: 34, mass: 2.5, squash: 0.15, paint: paintBowling },
+  { id: 'watermelon', name: 'Watermelon', r: 38, mass: 2.0, squash: 0.4, paint: paintWatermelon },
+];
+
+// Draws a ball at the origin with its lighting on top. Used for both the ball in
+// the scene and the sidebar thumbnails.
+function drawBallFace(c, type, r, angle) {
+  c.save();
+  c.rotate(angle);
+  c.beginPath();
+  c.arc(0, 0, r, 0, Math.PI * 2);
+  c.clip();
+  type.paint(c, r);
+  c.restore();
+
+  const light = c.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r);
+  light.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+  light.addColorStop(0.5, 'rgba(255, 255, 255, 0)');
+  light.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+  c.fillStyle = light;
+  c.beginPath();
+  c.arc(0, 0, r, 0, Math.PI * 2);
+  c.fill();
+}
+
 function drawBall() {
   const sy = 1 - ball.squash;
   const sx = 1 / Math.sqrt(sy);
 
   ctx.save();
-  ctx.translate(ball.x, ball.y + BALL_R); // squash from the bottom of the ball
+  ctx.translate(ball.x, ball.y + ball.r); // squash from the bottom of the ball
   ctx.scale(sx, sy);
-  ctx.translate(0, -BALL_R);
-  ctx.rotate(ball.angle);
-
-  const shade = ctx.createRadialGradient(-BALL_R * 0.35, -BALL_R * 0.4, BALL_R * 0.1, 0, 0, BALL_R);
-  shade.addColorStop(0, '#ffab6b');
-  shade.addColorStop(1, '#d9531a');
-  ctx.fillStyle = shade;
-  ctx.beginPath();
-  ctx.arc(0, 0, BALL_R, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Basketball seams
-  ctx.strokeStyle = '#3a1a0a';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-BALL_R, 0);
-  ctx.lineTo(BALL_R, 0);
-  ctx.moveTo(0, -BALL_R);
-  ctx.lineTo(0, BALL_R);
-  ctx.stroke();
-  for (const dir of [-1, 1]) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, BALL_R, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.beginPath();
-    ctx.arc(dir * BALL_R * 1.15, 0, BALL_R * 0.85, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
+  ctx.translate(0, -ball.r);
+  drawBallFace(ctx, ball.type, ball.r, ball.angle);
   ctx.restore();
 }
 
@@ -400,13 +519,71 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') {
+  if (e.code === 'Space' && !e.target.closest('button, input')) {
     e.preventDefault();
     resetBall();
   }
 });
 
-window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(canvas.parentElement);
+
+// ---- Ball picker ----
+
+const ballGrid = document.getElementById('balls');
+const ballButtons = new Map();
+
+function setBall(id) {
+  const type = BALLS.find((b) => b.id === id) || BALLS[0];
+  ball.type = type;
+  ball.r = type.r;
+  ball.mass = type.mass;
+  ball.squash = 0;
+  releaseGain = 1.25;
+  setGrip(type.r);
+  for (const [key, btn] of ballButtons) {
+    const selected = key === type.id;
+    btn.classList.toggle('is-selected', selected);
+    btn.setAttribute('aria-pressed', String(selected));
+  }
+  return type;
+}
+
+function selectBall(id) {
+  const type = setBall(id);
+  try {
+    localStorage.setItem('trampoline-ball', type.id);
+  } catch (err) {
+    // Storage can be unavailable; the choice just won't be remembered.
+  }
+  bounces = 0;
+  bouncesEl.textContent = bounces;
+  resetBall();
+}
+
+function buildBallPicker() {
+  const dpr = window.devicePixelRatio || 1;
+  const size = 64;
+  for (const type of BALLS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ball-option';
+
+    const thumb = document.createElement('canvas');
+    thumb.width = size * dpr;
+    thumb.height = size * dpr;
+    const tctx = thumb.getContext('2d');
+    tctx.setTransform(dpr, 0, 0, dpr, (size / 2) * dpr, (size / 2) * dpr);
+    drawBallFace(tctx, type, type.r * 0.72, 0.4);
+
+    const label = document.createElement('span');
+    label.textContent = type.name;
+
+    btn.append(thumb, label);
+    btn.addEventListener('click', () => selectBall(type.id));
+    ballGrid.appendChild(btn);
+    ballButtons.set(type.id, btn);
+  }
+}
 
 let last = performance.now();
 let accumulator = 0;
@@ -422,6 +599,14 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+buildBallPicker();
+let savedBall = null;
+try {
+  savedBall = localStorage.getItem('trampoline-ball');
+} catch (err) {
+  // ignore
+}
+setBall(savedBall);
 resize();
 resetBall();
 requestAnimationFrame(frame);

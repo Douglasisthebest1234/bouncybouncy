@@ -7,17 +7,25 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="scene"></canvas>
+  <div class="app">
+    <aside class="sidebar">
+      <h1>Trampoline</h1>
+      <div class="stat">Bounces <strong id="bounces">0</strong></div>
 
-  <div class="hud">
-    <h1>Trampoline</h1>
-    <div class="stat">Bounces <strong id="bounces">0</strong></div>
-    <label class="control">
-      <span>Bounce height <output id="heightOut"></output></span>
-      <input id="height" type="range" min="120" max="500" step="10" value="320">
-    </label>
-    <button id="drop" type="button">Drop ball</button>
-    <p class="hint">Click anywhere to drop the ball there.</p>
+      <h2>Choose a ball</h2>
+      <div id="balls" class="ball-grid"></div>
+
+      <label class="control">
+        <span>Bounce height <output id="heightOut"></output></span>
+        <input id="height" type="range" min="120" max="450" step="10" value="320">
+      </label>
+      <button id="drop" type="button">Drop ball</button>
+      <p class="hint">Click the sky to drop the ball there.</p>
+    </aside>
+
+    <main class="stage">
+      <canvas id="scene"></canvas>
+    </main>
   </div>
 
   <script src="script.js"></script>
