@@ -1,0 +1,96 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #8fd3ff;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #16324f;
+}
+
+#scene {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: pointer;
+}
+
+.hud {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  width: 220px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(20, 50, 90, 0.18);
+}
+
+.hud h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.stat {
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.stat strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.control {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.control span {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.control input {
+  width: 100%;
+  accent-color: #e8642c;
+}
+
+button {
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #e8642c;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #d4551f;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+@media (max-width: 480px) {
+  .hud {
+    width: 180px;
+    padding: 10px 12px;
+  }
+}
